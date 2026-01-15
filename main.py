@@ -1,0 +1,119 @@
+"""
+Block Blast Game Server for ESP32
+Creates an open WiFi access point and serves the Block Blast game
+"""
+
+import network
+import socket
+import gc
+import machine
+from time import sleep
+
+# WiFi Configuration
+AP_SSID = "BlockBlast-ESP32"
+AP_PASSWORD = ""  # Empty for open access point
+
+# HTML, CSS, and JS content (compressed for ESP32 memory)
+HTML_CONTENT = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"><title>Block Blast - ESP32</title><style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding-top: 20px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; } .game-container { width: 100%; max-width: 400px; padding: 10px 20px; display: flex; flex-direction: column; align-items: center; } .header { display: flex; justify-content: space-between; width: 100%; max-width: 320px; margin-bottom: 10px; } .score-container, .high-score-container { background: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 10px 20px; text-align: center; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); } .score-label, .high-score-label { font-size: 11px; font-weight: 700; color: #88ccff; letter-spacing: 1px; } .score-value, .high-score-value { font-size: 24px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 10px rgba(136, 204, 255, 0.5); } .combo-display { height: 30px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: #ffdd00; text-shadow: 0 0 10px rgba(255, 221, 0, 0.8); opacity: 0; transition: opacity 0.3s; } .combo-display.show { opacity: 1; animation: comboPulse 0.5s ease-out; } @keyframes comboPulse { 0% { transform: scale(1.5); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } } .grid-container { background: rgba(255, 255, 255, 0.05); border-radius: 16px; padding: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.1); } #gameCanvas { display: block; border-radius: 8px; } .pieces-container { display: flex; justify-content: center; gap: 15px; margin-top: 15px; width: 100%; } .piece-slot { width: 80px; height: 80px; background: rgba(255, 255, 255, 0.08); border-radius: 12px; display: flex; justify-content: center; align-items: center; border: 1px solid rgba(255, 255, 255, 0.15); position: relative; } .piece-slot canvas { position: absolute; touch-action: none; } .game-over-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: none; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(5px); } .game-over-modal.show { display: flex; animation: fadeIn 0.3s ease-out; } @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } .modal-content { background: linear-gradient(135deg, #2d2d44 0%, #1a1a2e 100%); padding: 40px; border-radius: 20px; text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); min-width: 280px; } .modal-content h2 { color: #ffffff; font-size: 32px; margin-bottom: 20px; text-shadow: 0 2px 10px rgba(136, 204, 255, 0.3); } .final-score { display: flex; justify-content: space-around; margin: 30px 0; padding: 20px; background: rgba(255, 255, 255, 0.05); border-radius: 12px; } .final-score span:first-child { color: #88ccff; font-size: 14px; font-weight: 600; } .final-score span:last-child { color: #ffffff; font-size: 36px; font-weight: 700; } .restart-btn { background: linear-gradient(135deg, #00d4aa 0%, #00a8cc 100%); color: #ffffff; border: none; padding: 15px 40px; font-size: 18px; font-weight: 700; border-radius: 12px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 5px 20px rgba(0, 212, 170, 0.4); } .restart-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0, 212, 170, 0.5); } .restart-btn:active { transform: translateY(0); } /* Draggable piece styles */ .dragging-piece { position: fixed; pointer-events: none; z-index: 1000; opacity: 0.9; } /* Piece colors - Block Blast style */ .piece-cyan { background: #00d4aa; } .piece-blue { background: #00a8cc; } .piece-orange { background: #ff8c42; } .piece-yellow { background: #ffdd00; } .piece-green { background: #7ec850; } .piece-red { background: #ff5252; } .piece-purple { background: #a855f7; } .piece-pink { background: #ff6b9d; } </style></head><body><div class="game-container"><div class="header"><div class="score-container"><div class="score-label">SCORE</div><div class="score-value" id="score">0</div></div><div class="high-score-container"><div class="high-score-label">BEST</div><div class="high-score-value" id="highScore">0</div></div></div><div class="combo-display" id="comboDisplay"></div><div class="grid-container"><canvas id="gameCanvas" width="320" height="320"></canvas></div><div class="pieces-container"><div class="piece-slot" id="piece0"></div><div class="piece-slot" id="piece1"></div><div class="piece-slot" id="piece2"></div></div></div><div class="game-over-modal" id="gameOverModal"><div class="modal-content"><h2>Game Over!</h2><div class="final-score"><span>Score</span><span id="finalScore">0</span></div><button class="restart-btn" id="restartBtn">Play Again</button></div></div><script>// Block Blast - ESP32 Version // Game Constants const GRID_SIZE = 8; const CELL_SIZE = 40; const CANVAS_SIZE = GRID_SIZE * CELL_SIZE; const PIECE_CELL_SIZE = 20; // Block Blast colors const COLORS = { cyan: '#00d4aa', blue: '#00a8cc', orange: '#ff8c42', yellow: '#ffdd00', green: '#7ec850', red: '#ff5252', purple: '#a855f7', pink: '#ff6b9d', empty: '#1e293b', grid: '#334155' }; const COLOR_KEYS = Object.keys(COLORS).filter(k => k !== 'empty' && k !== 'grid'); // Piece shapes (Tetris-like polyominoes) const PIECES = [ // Single { shape: [[1]], color: 'cyan' }, // 2-block line { shape: [[1, 1]], color: 'blue' }, { shape: [[1], [1]], color: 'blue' }, // 3-block line { shape: [[1, 1, 1]], color: 'green' }, { shape: [[1], [1], [1]], color: 'green' }, // 4-block line { shape: [[1, 1, 1, 1]], color: 'orange' }, { shape: [[1], [1], [1], [1]], color: 'orange' }, // 2x2 square { shape: [[1, 1], [1, 1]], color: 'yellow' }, // L shapes { shape: [[1, 0], [1, 0], [1, 1]], color: 'red' }, { shape: [[1, 1, 1], [1, 0, 0]], color: 'red' }, { shape: [[0, 1], [0, 1], [1, 1]], color: 'purple' }, { shape: [[1, 0, 0], [1, 1, 1]], color: 'purple' }, { shape: [[1, 1], [0, 1], [0, 1]], color: 'pink' }, { shape: [[0, 0, 1], [1, 1, 1]], color: 'pink' }, { shape: [[1, 1], [1, 0], [1, 0]], color: 'cyan' }, { shape: [[1, 1, 1], [0, 0, 1]], color: 'cyan' }, // T shape { shape: [[1, 1, 1], [0, 1, 0]], color: 'blue' }, { shape: [[0, 1], [1, 1], [0, 1]], color: 'blue' }, // Z/S shapes { shape: [[1, 1, 0], [0, 1, 1]], color: 'green' }, { shape: [[0, 1], [1, 1], [1, 0]], color: 'green' }, { shape: [[0, 1, 1], [1, 1, 0]], color: 'orange' }, { shape: [[1, 0], [1, 1], [0, 1]], color: 'orange' }, // 5-block shapes { shape: [[1, 1, 1, 1, 1]], color: 'red' }, { shape: [[1], [1], [1], [1], [1]], color: 'red' }, { shape: [[1, 1, 1], [1, 1, 0]], color: 'purple' }, { shape: [[1, 1, 1], [0, 1, 1]], color: 'purple' }, { shape: [[1, 1], [1, 1], [1, 0]], color: 'yellow' }, { shape: [[1, 1], [1, 1], [0, 1]], color: 'yellow' }, // Cross/plus { shape: [[0, 1, 0], [1, 1, 1]], color: 'pink' }, { shape: [[1, 0], [1, 1], [1, 0]], color: 'pink' } ]; // Block Blast scoring: 10 points per block cleared // Combo bonus: 1 line = +20, 2 lines = +30, 3 lines = +40, ..., 9 lines = +100 const POINTS_PER_BLOCK = 10; const COMBO_BONUS = [0, 20, 30, 40, 50, 60, 70, 80, 90, 100]; // Game state let grid = []; let score = 0; let highScore = parseInt(localStorage.getItem('blockBlastHighScore')) || 0; let currentPieces = []; let pieceCanvases = []; let draggedPiece = null; let draggedPieceIndex = -1; let ghostPosition = null; // {row, col, valid} let streakCount = 0; // Consecutive placements that cleared lines // Canvas setup const gameCanvas = document.getElementById('gameCanvas'); const ctx = gameCanvas.getContext('2d'); // Initialize game function init() { // Initialize grid grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null)); // Update high score display document.getElementById('highScore').textContent = highScore; // Generate initial pieces generateNewPieces(); // Draw initial grid drawGrid(); // Setup event listeners setupEventListeners(); } function generateNewPieces() { currentPieces = []; for (let i = 0; i < 3; i++) { const randomPiece = PIECES[Math.floor(Math.random() * PIECES.length)]; currentPieces.push(JSON.parse(JSON.stringify(randomPiece))); } renderPieces(); } function renderPieces() { const slots = ['piece0', 'piece1', 'piece2']; slots.forEach((slotId, index) => { const slot = document.getElementById(slotId); slot.innerHTML = ''; if (currentPieces[index]) { const piece = currentPieces[index]; const shape = piece.shape; const rows = shape.length; const cols = shape[0].length; const canvas = document.createElement('canvas'); canvas.width = cols * PIECE_CELL_SIZE; canvas.height = rows * PIECE_CELL_SIZE; canvas.dataset.index = index; const pieceCtx = canvas.getContext('2d'); drawPieceOnCanvas(pieceCtx, shape, piece.color, 0, 0, PIECE_CELL_SIZE); canvas.style.cursor = 'grab'; canvas.addEventListener('mousedown', startDrag); canvas.addEventListener('touchstart', startDrag, { passive: false }); slot.appendChild(canvas); pieceCanvases[index] = canvas; } }); } function drawPieceOnCanvas(ctx, shape, colorKey, offsetX, offsetY, cellSize, isGhost = false) { shape.forEach((row, rowIndex) => { row.forEach((cell, colIndex) => { if (cell) { const x = offsetX + colIndex * cellSize; const y = offsetY + rowIndex * cellSize; if (isGhost) { // Ghost piece - semi-transparent with border ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'; ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; ctx.lineWidth = 2; ctx.beginPath(); roundRect(ctx, x + 2, y + 2, cellSize - 4, cellSize - 4, 4); ctx.fill(); ctx.stroke(); } else { // Normal piece with gradient const gradient = ctx.createLinearGradient(x, y, x + cellSize, y + cellSize); gradient.addColorStop(0, COLORS[colorKey]); gradient.addColorStop(1, shadeColor(COLORS[colorKey], -20)); ctx.fillStyle = gradient; ctx.beginPath(); roundRect(ctx, x + 1, y + 1, cellSize - 2, cellSize - 2, 4); ctx.fill(); // Add highlight ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; ctx.beginPath(); roundRect(ctx, x + 3, y + 3, cellSize - 10, 4, 2); ctx.fill(); } } }); }); } function roundRect(ctx, x, y, width, height, radius) { ctx.moveTo(x + radius, y); ctx.lineTo(x + width - radius, y); ctx.quadraticCurveTo(x + width, y, x + width, y + radius); ctx.lineTo(x + width, y + height - radius); ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height); ctx.lineTo(x + radius, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - radius); ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y); ctx.closePath(); } function shadeColor(color, percent) { const num = parseInt(color.replace('#', ''), 16); const amt = Math.round(2.55 * percent); const R = (num >> 16) + amt; const G = (num >> 8 & 0x00FF) + amt; const B = (num & 0x0000FF) + amt; return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1); } function drawGrid() { // Clear canvas ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE); // Draw grid cells for (let row = 0; row < GRID_SIZE; row++) { for (let col = 0; col < GRID_SIZE; col++) { const x = col * CELL_SIZE; const y = row * CELL_SIZE; if (grid[row][col]) { // Draw filled cell const colorKey = grid[row][col]; const gradient = ctx.createLinearGradient(x, y, x + CELL_SIZE, y + CELL_SIZE); gradient.addColorStop(0, COLORS[colorKey]); gradient.addColorStop(1, shadeColor(COLORS[colorKey], -20)); ctx.fillStyle = gradient; ctx.beginPath(); roundRect(ctx, x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2, 6); ctx.fill(); // Add highlight ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; ctx.beginPath(); roundRect(ctx, x + 4, y + 4, CELL_SIZE - 12, 6, 3); ctx.fill(); } else { // Draw empty cell with subtle border ctx.fillStyle = 'rgba(255, 255, 255, 0.02)'; ctx.beginPath(); roundRect(ctx, x + 1, y + 1, CELL_SIZE - 2, CELL_SIZE - 2, 6); ctx.fill(); ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'; ctx.lineWidth = 1; ctx.stroke(); } } } // Draw ghost piece if dragging if (ghostPosition && draggedPiece) { const { row, col, valid } = ghostPosition; const ghostColor = valid ? 'rgba(0, 255, 100, 0.3)' : 'rgba(255, 50, 50, 0.3)'; const ghostStroke = valid ? 'rgba(0, 255, 100, 0.6)' : 'rgba(255, 50, 50, 0.6)'; draggedPiece.shape.forEach((shapeRow, r) => { shapeRow.forEach((cell, c) => { if (cell) { const x = (col + c) * CELL_SIZE; const y = (row + r) * CELL_SIZE; // Check if this cell is within the grid if (row + r >= 0 && row + r < GRID_SIZE && col + c >= 0 && col + c < GRID_SIZE) { ctx.fillStyle = ghostColor; ctx.strokeStyle = ghostStroke; ctx.lineWidth = 2; ctx.beginPath(); roundRect(ctx, x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4, 5); ctx.fill(); ctx.stroke(); } } }); }); } } function setupEventListeners() { // Mouse events document.addEventListener('mousemove', drag); document.addEventListener('mouseup', endDrag); // Touch events document.addEventListener('touchmove', drag, { passive: false }); document.addEventListener('touchend', endDrag); // Restart button document.getElementById('restartBtn').addEventListener('click', restartGame); } function startDrag(e) { e.preventDefault(); const canvas = e.target; draggedPieceIndex = parseInt(canvas.dataset.index); draggedPiece = currentPieces[draggedPieceIndex]; if (!draggedPiece) return; const touch = e.touches ? e.touches[0] : e; const rect = canvas.getBoundingClientRect(); // Calculate offset from where user clicked on the piece const offsetX = touch.clientX - rect.left; const offsetY = touch.clientY - rect.top; // Store this for proper snapping canvas.dataset.dragOffsetX = offsetX; canvas.dataset.dragOffsetY = offsetY; // Create dragging canvas const dragCanvas = document.createElement('canvas'); dragCanvas.className = 'dragging-piece'; dragCanvas.width = draggedPiece.shape[0].length * CELL_SIZE; dragCanvas.height = draggedPiece.shape.length * CELL_SIZE; const dragCtx = dragCanvas.getContext('2d'); drawPieceOnCanvas(dragCtx, draggedPiece.shape, draggedPiece.color, 0, 0, CELL_SIZE); dragCanvas.style.left = (touch.clientX - dragCanvas.width / 2) + 'px'; dragCanvas.style.top = (touch.clientY - dragCanvas.height / 2) + 'px'; document.body.appendChild(dragCanvas); // Hide original piece canvas.style.opacity = '0.3'; // Initial ghost calculation updateGhostPosition(touch.clientX, touch.clientY); drawGrid(); } function drag(e) { if (!draggedPiece) return; e.preventDefault(); const touch = e.touches ? e.touches[0] : e; const dragCanvas = document.querySelector('.dragging-piece'); if (dragCanvas) { dragCanvas.style.left = (touch.clientX - dragCanvas.width / 2) + 'px'; dragCanvas.style.top = (touch.clientY - dragCanvas.height / 2) + 'px'; } // Update ghost position updateGhostPosition(touch.clientX, touch.clientY); drawGrid(); } function updateGhostPosition(clientX, clientY) { if (!draggedPiece) { ghostPosition = null; return; } const gridRect = gameCanvas.getBoundingClientRect(); // Calculate which grid cell the mouse is over const gridX = clientX - gridRect.left; const gridY = clientY - gridRect.top; // Calculate the center offset of the piece const pieceWidth = draggedPiece.shape[0].length * CELL_SIZE; const pieceHeight = draggedPiece.shape.length * CELL_SIZE; // Snap to nearest grid position (piece centered on cursor) const col = Math.round((gridX - pieceWidth / 2) / CELL_SIZE); const row = Math.round((gridY - pieceHeight / 2) / CELL_SIZE); // Check if this position is valid const valid = canPlacePiece(draggedPiece.shape, row, col); ghostPosition = { row, col, valid }; } function endDrag(e) { if (!draggedPiece) return; const dragCanvas = document.querySelector('.dragging-piece'); // Try to place piece at ghost position if (ghostPosition && ghostPosition.valid) { placePiece(draggedPiece.shape, draggedPiece.color, ghostPosition.row, ghostPosition.col); currentPieces[draggedPieceIndex] = null; // Check for lines to clear const linesCleared = checkAndClearLines(); // Update streak: increment if lines were cleared, reset otherwise if (linesCleared > 0) { streakCount++; } else { streakCount = 0; } // Check if all pieces used if (currentPieces.every(p => p === null)) { generateNewPieces(); } else { renderPieces(); } // Check for game over checkGameOver(); } // Remove dragging canvas if (dragCanvas) { dragCanvas.remove(); } // Reset piece opacity if (pieceCanvases[draggedPieceIndex]) { pieceCanvases[draggedPieceIndex].style.opacity = '1'; } // Clear ghost and redraw ghostPosition = null; draggedPiece = null; draggedPieceIndex = -1; drawGrid(); } function canPlacePiece(shape, startRow, startCol) { for (let r = 0; r < shape.length; r++) { for (let c = 0; c < shape[0].length; c++) { if (shape[r][c]) { const gridRow = startRow + r; const gridCol = startCol + c; // Check bounds if (gridRow < 0 || gridRow >= GRID_SIZE || gridCol < 0 || gridCol >= GRID_SIZE) { return false; } // Check if cell is empty if (grid[gridRow][gridCol]) { return false; } } } } return true; } function placePiece(shape, color, startRow, startCol) { for (let r = 0; r < shape.length; r++) { for (let c = 0; c < shape[0].length; c++) { if (shape[r][c]) { grid[startRow + r][startCol + c] = color; } } } drawGrid(); } function checkAndClearLines() { const rowsToClear = []; const colsToClear = []; // Check rows for (let row = 0; row < GRID_SIZE; row++) { if (grid[row].every(cell => cell !== null)) { rowsToClear.push(row); } } // Check columns for (let col = 0; col < GRID_SIZE; col++) { let full = true; for (let row = 0; row < GRID_SIZE; row++) { if (!grid[row][col]) { full = false; break; } } if (full) { colsToClear.push(col); } } const totalLines = rowsToClear.length + colsToClear.length; if (totalLines > 0) { // Count total blocks cleared for scoring let blocksCleared = 0; // Count unique blocks in rows (accounting for overlap with columns) rowsToClear.forEach(row => { for (let col = 0; col < GRID_SIZE; col++) { if (grid[row][col]) { blocksCleared++; } } }); // Count additional blocks in columns that weren't in cleared rows colsToClear.forEach(col => { for (let row = 0; row < GRID_SIZE; row++) { if (grid[row][col] && !rowsToClear.includes(row)) { blocksCleared++; } } }); // Clear rows rowsToClear.forEach(row => { for (let col = 0; col < GRID_SIZE; col++) { grid[row][col] = null; } }); // Clear columns colsToClear.forEach(col => { for (let row = 0; row < GRID_SIZE; row++) { grid[row][col] = null; } }); // Calculate Block Blast score: 10 points per block + combo bonus const baseScore = blocksCleared * POINTS_PER_BLOCK; const comboBonus = COMBO_BONUS[Math.min(totalLines, 9)] || 100; const streakBonus = streakCount > 1 ? (streakCount - 1) * 5 : 0; // Small bonus for streaks const totalScore = baseScore + comboBonus + streakBonus; score += totalScore; // Show combo showCombo(totalLines, blocksCleared, comboBonus, streakCount); updateScore(); drawGrid(); return totalLines; } return 0; } function showCombo(lines, blocks, bonus, streak) { const comboDisplay = document.getElementById('comboDisplay'); if (lines === 1 && streak <= 1) { return; // Don't show for single line without streak } let text = ''; if (lines >= 2) { if (lines === 2) text += 'DOUBLE! '; else if (lines === 3) text += 'TRIPLE! '; else text += `${lines}x LINES! `; } if (streak > 1) { text += `STREAK x${streak} `; } text += `+${bonus}`; comboDisplay.textContent = text; comboDisplay.classList.add('show'); setTimeout(() => { comboDisplay.classList.remove('show'); }, 1200); } function updateScore() { document.getElementById('score').textContent = score; if (score > highScore) { highScore = score; localStorage.setItem('blockBlastHighScore', highScore); document.getElementById('highScore').textContent = highScore; } } function checkGameOver() { // Check if any remaining piece can be placed const availablePieces = currentPieces.filter(p => p !== null); if (availablePieces.length === 0) { return; // Will generate new pieces } let canPlaceAny = false; for (const piece of availablePieces) { for (let row = -2; row < GRID_SIZE + 2; row++) { for (let col = -2; col < GRID_SIZE + 2; col++) { if (canPlacePiece(piece.shape, row, col)) { canPlaceAny = true; break; } } if (canPlaceAny) break; } if (canPlaceAny) break; } if (!canPlaceAny) { showGameOver(); } } function showGameOver() { document.getElementById('finalScore').textContent = score; document.getElementById('gameOverModal').classList.add('show'); } function restartGame() { grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null)); score = 0; streakCount = 0; document.getElementById('score').textContent = '0'; document.getElementById('gameOverModal').classList.remove('show'); generateNewPieces(); drawGrid(); } // Start game when page loads window.addEventListener('load', init); </script></body></html> """
+
+
+def setup_access_point():
+    """Configure and start the WiFi access point"""
+    ap = network.WLAN(network.AP_IF)
+    ap.active(True)
+
+    # Configure access point
+    ap.config(essid=AP_SSID, password=AP_PASSWORD)
+
+    print(f"Access Point '{AP_SSID}' started!")
+    print("Waiting for connection...")
+
+    # Print IP address
+    while not ap.active():
+        pass
+
+    ip = ap.ifconfig()[0]
+    print(f"Connect to: http://{ip}")
+    print(f"SSID: {AP_SSID}")
+    if AP_PASSWORD:
+        print(f"Password: {AP_PASSWORD}")
+    else:
+        print("(Open network - no password)")
+
+    return ip
+
+
+def serve_page(conn):
+    """Serve the game page to a client"""
+    try:
+        # Send HTTP response
+        conn.send('HTTP/1.1 200 OK\r\n')
+        conn.send('Content-Type: text/html\r\n')
+        conn.send('Connection: close\r\n\r\n')
+        conn.sendall(HTML_CONTENT)
+    except Exception as e:
+        print(f"Error sending page: {e}")
+    finally:
+        conn.close()
+
+
+def run_server():
+    """Run the web server"""
+    # Setup access point
+    ip = setup_access_point()
+
+    # Create socket
+    addr = socket.getaddrinfo(ip, 80)[0][-1]
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(addr)
+    s.listen(5)
+
+    print(f"Server running on http://{ip}")
+    print("Press Ctrl+C to stop")
+
+    # Main server loop
+    while True:
+        try:
+            conn, addr = s.accept()
+            client_ip = addr[0]
+            print(f"Client connected from {client_ip}")
+
+            # Read request (but ignore it - we always serve the game)
+            request = conn.recv(1024)
+            gc.collect()
+
+            # Serve the page
+            serve_page(conn)
+
+        except KeyboardInterrupt:
+            print("\nShutting down server...")
+            s.close()
+            break
+        except Exception as e:
+            print(f"Server error: {e}")
+            gc.collect()
+
+
+def main():
+    """Main entry point"""
+    print("=" * 40)
+    print("Block Blast Game Server for ESP32")
+    print("=" * 40)
+    print()
+
+    # Free memory before starting
+    gc.collect()
+
+    # Start the server
+    try:
+        run_server()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        machine.reset()
+
+
+if __name__ == "__main__":
+    main()

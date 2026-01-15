@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# ESP32/MicroPython
+.pybuild/
+deps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Serial ports
+/cu.*
+/tty.*
+/COM*
+
+# Temporary files
+.mpfshell_cmds.txt
+*.pyc
