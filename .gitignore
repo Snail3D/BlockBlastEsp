@@ -34,3 +34,8 @@ build/
 # Temporary files
 .mpfshell_cmds.txt
 *.pyc
+
+# Environment variables and secrets
+.env
+.env.local
+WOKWI_CLI_TOKEN
