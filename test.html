@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Block Blast</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            color: #fff;
+        }
+        .title {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .score {
+            font-size: 1.2rem;
+            color: #00ff88;
+            margin-bottom: 15px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 3px;
+            background: #2a2a4e;
+            padding: 10px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        .cell {
+            width: 42px;
+            height: 42px;
+            background: #3a3a5e;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+        }
+        .cell.filled {
+            box-shadow: 0 0 10px currentColor, inset 0 0 10px rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .cell.hl {
+            background: #00ff88 !important;
+            box-shadow: 0 0 15px #00ff88;
+        }
+        .cell.inv {
+            background: #ff4444 !important;
+            box-shadow: 0 0 15px #ff4444;
+        }
+        .pieces {
+            display: flex;
+            gap: 15px;
+            margin-top: 25px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .piece {
+            background: #2a2a4e;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: grab;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border: 2px solid #4a4a7e;
+        }
+        .piece:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(0,217,255,0.3);
+            border-color: #00d9ff;
+        }
+        .piece:active {
+            cursor: grabbing;
+        }
+        .piece-grid {
+            display: grid;
+            gap: 2px;
+        }
+        .piece-cell {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            box-shadow: 0 0 5px currentColor, inset 0 0 5px rgba(255,255,255,0.2);
+        }
+        .piece-cell.e {
+            background: transparent;
+            box-shadow: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="title">Block Blast</div>
+    <div class="score" id="score">Score: 0</div>
+    <div class="grid" id="grid"></div>
+    <div class="pieces" id="pieces"></div>
+
+    <script>
+        const S = 8;
+        const P = [
+            {s:[1,1],c:'#FF6666'},
+            {s:[1,1,1],c:'#44CCDD'},
+            {s:[1,1,1,1],c:'#44BB77'},
+            {s:[1,1,1,1,1],c:'#FFAA77'},
+            {s:[1,1],[1,1],c:'#99CCEE'},
+            {s:[1,1,1],[0,1,0],c:'#FFDD77'},
+            {s:[1,1,1],[1,0,0],c:'#DD7777'},
+            {s:[1,1,1],[0,0,1],c:'#995599'},
+            {s:[1,0,0],[1,1,1],c:'#3388DD'},
+            {s:[0,0,1],[1,1,1],c:'#FF4477'},
+            {s:[0,1,1],[1,1,0],c:'#2277BB'},
+            {s:[1,1,0],[0,1,1],c:'#FF9922'},
+            {s:[1,0],[1,0],[1,1],c:'#11AACC'},
+            {s:[0,1],[0,1],[1,1],c:'#EE4488'},
+            {s:[1,0],[1,1],c:'#00BBCC'},
+            {s:[0,1],[1,1],c:'#7755AA'}
+        ];
+
+        let g = Array(S).fill(null).map(() => Array(S).fill(0));
+        let sc = 0;
+        let ps = [];
+
+        function init() {
+            R();
+            spawn();
+        }
+
+        function R() {
+            const gr = document.getElementById('grid');
+            gr.innerHTML = '';
+            for (let r = 0; r < S; r++) {
+                for (let c = 0; c < S; c++) {
+                    const d = document.createElement('div');
+                    d.className = 'cell';
+                    d.dataset.r = r;
+                    d.dataset.c = c;
+                    if (g[r][c]) {
+                        d.classList.add('filled');
+                        d.style.color = g[r][c];
+                        d.style.background = g[r][c];
+                    }
+                    gr.appendChild(d);
+                }
+            }
+        }
+
+        function spawn() {
+            ps = [];
+            for (let i = 0; i < 3; i++) {
+                const idx = Math.floor(Math.random() * P.length);
+                ps.push({...P[idx], id: i});
+            }
+            rend();
+        }
+
+        function sh(s) {
+            return typeof s[0] === 'number' ? s.map(x => [x]) : s;
+        }
+
+        function rend() {
+            const p = document.getElementById('pieces');
+            p.innerHTML = '';
+            ps.forEach((pc, i) => {
+                const pe = document.createElement('div');
+                pe.className = 'piece';
+                const s = sh(pc.s);
+                const pg = document.createElement('div');
+                pg.className = 'piece-grid';
+                pg.style.gridTemplateColumns = `repeat(${s[0].length}, 1fr)`;
+                s.forEach(r => {
+                    r.forEach(c => {
+                        const d = document.createElement('div');
+                        d.className = 'piece-cell' + (c ? '' : ' e');
+                        if (c) {
+                            d.style.color = pc.c;
+                            d.style.background = pc.c;
+                        }
+                        pg.appendChild(d);
+                    });
+                });
+                pe.appendChild(pg);
+                drag(pe, i);
+                p.appendChild(pe);
+            });
+        }
+
+        function drag(el, i) {
+            let d;
+            const onDown = e => {
+                e.preventDefault();
+                const t = e.touches ? e.touches[0] : e;
+                d = el.cloneNode(true);
+                d.style.cssText = 'position:fixed;pointer-events:none;z-index:1000;opacity:0.85;';
+                d.style.left = (t.clientX - 30) + 'px';
+                d.style.top = (t.clientY - 30) + 'px';
+                document.body.appendChild(d);
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('touchmove', onMove, {passive: false});
+                document.addEventListener('touchend', onUp);
+            };
+            const onMove = e => {
+                if (!d) return;
+                const t = e.touches ? e.touches[0] : e;
+                d.style.left = (t.clientX - 30) + 'px';
+                d.style.top = (t.clientY - 30) + 'px';
+                hl(ps[i], t.clientX, t.clientY);
+            };
+            const onUp = e => {
+                if (!d) return;
+                const t = e.changedTouches ? e.changedTouches[0] : e;
+                if (place(ps[i], t.clientX, t.clientY)) {
+                    ps.splice(i, 1);
+                    if (ps.length === 0) spawn();
+                    chk();
+                }
+                d.remove();
+                d = null;
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onUp);
+                clr();
+            };
+            el.addEventListener('mousedown', onDown);
+            el.addEventListener('touchstart', onDown, {passive: false});
+        }
+
+        function hl(pc, x, y) {
+            clr();
+            const gr = document.getElementById('grid');
+            const rect = gr.getBoundingClientRect();
+            const cell = document.querySelector('.cell');
+            if (!cell) return;
+            const cellRect = cell.getBoundingClientRect();
+
+            const px = x - rect.left - 10;
+            const py = y - rect.top - 10;
+            const cx = Math.floor(px / (cellRect.width + 3));
+            const cy = Math.floor(py / (cellRect.height + 3));
+
+            if (cx < 0 || cx >= S || cy < 0 || cy >= S) return;
+
+            const s = sh(pc.s);
+            const ro = Math.floor(s.length / 2);
+            const co = Math.floor(s[0].length / 2);
+
+            s.forEach((rw, i) => {
+                rw.forEach((cell, j) => {
+                    if (cell) {
+                        const nr = cy + i - ro;
+                        const nc = cx + j - co;
+                        const el = document.querySelector(`.cell[data-r="${nr}"][data-c="${nc}"]`);
+                        if (el) {
+                            if (nr >= 0 && nr < S && nc >= 0 && nc < S && !g[nr][nc]) {
+                                el.classList.add('hl');
+                            } else {
+                                el.classList.add('inv');
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        function clr() {
+            document.querySelectorAll('.hl, .inv').forEach(e => {
+                e.classList.remove('hl', 'inv');
+            });
+        }
+
+        function can(s, r, c) {
+            const ro = Math.floor(s.length / 2);
+            const co = Math.floor(s[0].length / 2);
+            return s.every((rw, i) => rw.every((cell, j) => {
+                if (!cell) return true;
+                const nr = r + i - ro;
+                const nc = c + j - co;
+                return nr >= 0 && nr < S && nc >= 0 && nc < S && !g[nr][nc];
+            }));
+        }
+
+        function place(pc, x, y) {
+            const gr = document.getElementById('grid');
+            if (!gr) return false;
+            const rect = gr.getBoundingClientRect();
+            const cell = document.querySelector('.cell');
+            if (!cell) return false;
+            const cellRect = cell.getBoundingClientRect();
+
+            const px = x - rect.left - 10;
+            const py = y - rect.top - 10;
+            const cx = Math.floor(px / (cellRect.width + 3));
+            const cy = Math.floor(py / (cellRect.height + 3));
+
+            if (cx < 0 || cx >= S || cy < 0 || cy >= S) return false;
+
+            const s = sh(pc.s);
+            if (!can(s, cx, cy)) return false;
+
+            const ro = Math.floor(s.length / 2);
+            const co = Math.floor(s[0].length / 2);
+
+            s.forEach((rw, i) => {
+                rw.forEach((cell, j) => {
+                    if (cell) {
+                        const nr = cy + i - ro;
+                        const nc = cx + j - co;
+                        g[nr][nc] = pc.c;
+                    }
+                });
+            });
+
+            sc += s.flat().filter(x => x).length;
+            document.getElementById('score').textContent = 'Score: ' + sc;
+            R();
+            return true;
+        }
+
+        function chk() {
+            let cl = new Set();
+            for (let r = 0; r < S; r++) {
+                if (g[r].every(c => c !== 0)) {
+                    for (let c = 0; c < S; c++) cl.add(`${r},${c}`);
+                }
+            }
+            for (let c = 0; c < S; c++) {
+                if (g.every(r => r[c] !== 0)) {
+                    for (let r = 0; r < S; r++) cl.add(`${r},${c}`);
+                }
+            }
+            if (cl.size > 0) {
+                cl.forEach(k => {
+                    const [r, c] = k.split(',');
+                    g[r][c] = 0;
+                });
+                sc += cl.size * 10;
+                document.getElementById('score').textContent = 'Score: ' + sc;
+                R();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
